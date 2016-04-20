@@ -60,12 +60,6 @@ import (
 )
 
 const (
-	defaultLogFile     = "or-ctl-filter.log"
-	defaultFiltersPath = "./filters"
-
-	controlSocketFile = "/var/run/tor/control"
-	torControlAddr    = "127.0.0.1:8851" // Match ControlPort in torrc-defaults.
-
 	cmdProtocolInfo  = "PROTOCOLINFO"
 	cmdAuthenticate  = "AUTHENTICATE"
 	cmdAuthChallenge = "AUTHCHALLENGE"
@@ -90,8 +84,6 @@ const (
 	errAuthenticationRequired = "514 Authentication required\n"
 	errUnrecognizedCommand    = "510 Unrecognized command\n"
 )
-
-var filteredControlAddr *net.UnixAddr
 
 func readAuthCookie(path string) ([]byte, error) {
 	log.Print("read auth cookie")
@@ -400,22 +392,50 @@ func filterConnection(appConn net.Conn, filterConfig *ServerClientFilterConfig) 
 	}
 }
 
+type RoflcoptorConfig struct {
+
+}
+
+func loadConfiguration(configFilePath string) (*RoflcoptorConfig, error) {
+	config RoflcoptorConfig{}
+	file, err := os.Open(configFilePath)
+	if err != nil {
+		return nil, err
+	}
+	scanner := bufio.NewScanner(file)
+	bs := ""
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !commentRegexp.MatchString(line) {
+			bs += line + "\n"
+		}
+	}
+	if err := json.Unmarshal([]byte(bs), config); err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 func main() {
-	var enableLogging bool
 	var logFile string
 	var listenPort, listenIp string
+	var string configFilePath
+	var bool watchMode
+	var filteredControlAddr *net.UnixAddr
 	var err error
 
-	flag.BoolVar(&enableLogging, "enable-logging", false, "enable logging")
-	flag.StringVar(&logFile, "log-file", defaultLogFile, "log file")
-	flag.StringVar(&listenPort, "listen-port", "", "TCP port to listen on")
-	flag.StringVar(&listenIp, "listen-ip", "", "IP address to listen on")
+	flag.StringVar(&configFilePath, "config", "", "configuration file")
+	flag.BoolVar(&watchMode, "watch", false, "watch-mode of operation will default to unfiltered-allow policy")
 	flag.Parse()
 
+	// Load configuration file
+	config, err = loadConfiguration(configFilePath)
+	if err != nil {
+		panic(err)
+	}
+
 	// Deal with logging.
-	if !enableLogging {
-		log.SetOutput(ioutil.Discard)
-	} else if logFile == "-" {
+	if logFile == "-" {
 		log.SetOutput(os.Stderr)
 	} else if logFile != "" {
 		f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)

@@ -8,6 +8,21 @@ import (
 	"github.com/yawning/bulb"
 )
 
+type MockProcInfo struct {
+}
+
+func (r MockProcInfo) LookupTCPSocketProcess(srcPort uint16, dstAddr net.IP, dstPort uint16) *procsnitch.Info {
+	info := procsnitch.Info{
+		UID:       1,
+		Pid:       1,
+		ParentPid: 1,
+		loaded:    true,
+		ExePath:   "testing_exec_path",
+		CmdLine:   "testing_cmd_line",
+	}
+	return &info
+}
+
 func TestProxyListener(t *testing.T) {
 	config := RoflcoptorConfig{
 		LogFile:              "-",
@@ -41,4 +56,5 @@ func TestProxyListener(t *testing.T) {
 		t.Fail()
 	}
 	fmt.Printf("protoInfo %s", protoInfo)
+
 }

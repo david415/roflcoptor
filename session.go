@@ -13,6 +13,17 @@ import (
 	"github.com/yawning/bulb"
 )
 
+type ProcInfo interface {
+	LookupTCPSocketProcess(srcPort uint16, dstAddr net.IP, dstPort uint16) *procsnitch.Info
+}
+
+type RealProcInfo struct {
+}
+
+func (r RealProcInfo) LookupTCPSocketProcess(srcPort uint16, dstAddr net.IP, dstPort uint16) *procsnitch.Info {
+	return procsnitch.LookupTCPSocketProcess(srcPort, dstAddr, dstPort)
+}
+
 // ProxyListener is used to listen for
 // Tor Control port connections and
 // dispatches them to worker sessions
@@ -140,6 +151,8 @@ type ProxySession struct {
 	torConn   *bulb.Conn
 	protoInfo *bulb.ProtocolInfo
 
+	procInfo ProcInfo
+
 	watch   bool
 	errChan chan error
 	sync.WaitGroup
@@ -155,6 +168,7 @@ func NewAuthProxySession(conn net.Conn, cfg *RoflcoptorConfig, policy *ServerCli
 		appConn:       conn,
 		appConnReader: bufio.NewReader(conn),
 		errChan:       make(chan error, 2),
+		procInfo:      RealProcInfo{},
 	}
 	return &s
 }

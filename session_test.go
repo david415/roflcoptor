@@ -65,8 +65,9 @@ func (a *AccumulatingListener) SessionWorker(conn net.Conn) {
 		if err != nil {
 			panic(err)
 		}
-		a.buffer.WriteString(string(line))
 		lineStr := strings.TrimSpace(string(line))
+		a.buffer.WriteString(lineStr + "\n")
+
 		if string(lineStr) == "PROTOCOLINFO" {
 			conn.Write([]byte(`250-PROTOCOLINFO 1
 250-AUTH METHODS=NULL
@@ -123,20 +124,14 @@ func TestProxyListenerSession(t *testing.T) {
 		panic(err)
 	}
 
-	_, err = torConn.Write([]byte("ADD_ONION 1234\n"))
-	if err != nil {
-		panic(err)
-	}
 	/*
-		var protoInfo *bulb.ProtocolInfo
-		protoInfo, err = torConn.ProtocolInfo()
+		_, err = torConn.Write([]byte("ADD_ONION 1234\n"))
 		if err != nil {
-			t.Errorf("Failed to issue PROTOCOLINFO: %v", err)
-			t.Fail()
+			panic(err)
 		}
-		fmt.Printf("protoInfo %s", protoInfo)
 	*/
 	fmt.Printf("acc -%s-\n", accListener.buffer.String())
+	fmt.Print("    -PROTOCOLINFO\nAUTHENTICATE\nPROTOCOLINFO\n-\n")
 	if accListener.buffer.String() != "PROTOCOLINFO\nAUTHENTICATE\nPROTOCOLINFO\n" {
 		t.Errorf("accumulated control commands don't match", err)
 		t.Fail()

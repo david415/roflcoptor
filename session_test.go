@@ -124,15 +124,8 @@ func TestProxyListenerSession(t *testing.T) {
 		panic(err)
 	}
 
-	/*
-		_, err = torConn.Write([]byte("ADD_ONION 1234\n"))
-		if err != nil {
-			panic(err)
-		}
-	*/
 	fmt.Printf("acc -%s-\n", accListener.buffer.String())
-	fmt.Print("    -PROTOCOLINFO\nAUTHENTICATE\nPROTOCOLINFO\n-\n")
-	if accListener.buffer.String() != "PROTOCOLINFO\nAUTHENTICATE\nPROTOCOLINFO\n" {
+	if accListener.buffer.String() != "PROTOCOLINFO\nAUTHENTICATE\nPROTOCOLINFO\nAUTHENTICATE\n" {
 		t.Errorf("accumulated control commands don't match", err)
 		t.Fail()
 	}

@@ -146,7 +146,6 @@ func (p *ProxyListener) InitAllListeners() {
 	// including UNIX domain sockets.
 	p.InitAuthenticatedListeners()
 
-	// XXX TODO add UNIX domain socket listener
 	p.FilterAcceptLoop()
 }
 
@@ -312,7 +311,7 @@ func (s *ProxySession) sessionWorker() {
 
 	if s.policy == nil {
 		s.policy = s.getFilterPolicy()
-		if s.policy == nil {
+		if s.policy == nil && !s.watch {
 			_, err = s.writeAppConn([]byte("510 Tor Control proxy connection denied.\r\n"))
 			if err != nil {
 				s.errChan <- err

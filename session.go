@@ -43,7 +43,7 @@ type ProxyListener struct {
 	watch          bool
 	wg             *sync.WaitGroup
 	listener       net.Listener
-	onionDenyAddrs []ListenAddr
+	onionDenyAddrs []AddrString
 	errChan        chan error
 	procInfo       ProcInfo
 	policyList     PolicyList
@@ -81,20 +81,24 @@ func (p *ProxyListener) StartListeners() {
 	// Previously authenticated listeners can be any network type
 	// including UNIX domain sockets.
 	p.InitAuthenticatedListeners()
-	p.wg.Add(1)
-	go p.FilterAcceptLoop()
+	for _, listener := range p.cfg.Listeners {
+		p.wg.Add(1)
+		go p.FilterAcceptLoop(listener.Net, listener.Address)
+	}
 }
 
 func (p *ProxyListener) compileOnionAddrBlacklist() {
 	p.onionDenyAddrs = p.policyList.getListenerAddresses()
-	p.onionDenyAddrs = append(p.onionDenyAddrs, ListenAddr{
-		net:     p.cfg.TorControlNet,
-		address: p.cfg.TorControlAddress,
+	p.onionDenyAddrs = append(p.onionDenyAddrs, AddrString{
+		Net:     p.cfg.TorControlNet,
+		Address: p.cfg.TorControlAddress,
 	})
-	p.onionDenyAddrs = append(p.onionDenyAddrs, ListenAddr{
-		net:     p.cfg.ListenNet,
-		address: p.cfg.ListenAddress,
-	})
+	for _, listener := range p.cfg.Listeners {
+		p.onionDenyAddrs = append(p.onionDenyAddrs, AddrString{
+			Net:     listener.Net,
+			Address: listener.Address,
+		})
+	}
 }
 
 // InitAuthenticatedListeners runs each auth listener
@@ -130,32 +134,13 @@ func (p *ProxyListener) AuthListener(listener net.Listener, policy *SievePolicyJ
 	}
 }
 
-// InitAllListeners initialize all tor control port proxy listeners.
-// There are currently two types of listeners with two types of authentication:
-//
-// - Applications which are not in the Oz jail will have their kernel enforced unique
-// exec path which we use to determine which filter policy to apply.
-//
-// - "previously authenticated" listeners designate the policy based on the
-// client's ability to connect, therefore access to this listener must be restricted
-// by other means. All applications running from an Oz shell will appear to have
-// the same exec path of "/usr/sbin/oz-daemon"
-func (p *ProxyListener) InitAllListeners() {
-
-	// Previously authenticated listeners can be any network type
-	// including UNIX domain sockets.
-	p.InitAuthenticatedListeners()
-
-	p.FilterAcceptLoop()
-}
-
 // FilterAcceptLoop and listens and accepts new
 // connections and passes them into our filter proxy pipeline
-func (p *ProxyListener) FilterAcceptLoop() {
+func (p *ProxyListener) FilterAcceptLoop(netStr, address string) {
 	var err error
 	defer p.wg.Done()
 
-	p.listener, err = net.Listen(p.cfg.ListenNet, p.cfg.ListenAddress)
+	p.listener, err = net.Listen(netStr, address)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to listen on the filter port: %s\n", err))
 	}
@@ -184,7 +169,7 @@ type ProxySession struct {
 	appConn           net.Conn
 	torControlNet     string
 	torControlAddress string
-	addOnionDenyList  []ListenAddr
+	addOnionDenyList  []AddrString
 	watch             bool
 	procInfo          ProcInfo
 	policy            *SievePolicyJSONConfig
@@ -202,7 +187,7 @@ type ProxySession struct {
 
 // NewAuthProxySession creates an instance of ProxySession that is prepared with a previously
 // authenticated policy.
-func NewAuthProxySession(conn net.Conn, torControlNet, torControlAddress string, addOnionDenyList []ListenAddr, watch bool, procInfo ProcInfo, policy *SievePolicyJSONConfig) *ProxySession {
+func NewAuthProxySession(conn net.Conn, torControlNet, torControlAddress string, addOnionDenyList []AddrString, watch bool, procInfo ProcInfo, policy *SievePolicyJSONConfig) *ProxySession {
 	s := ProxySession{
 		torControlNet:     torControlNet,
 		torControlAddress: torControlAddress,
@@ -217,7 +202,7 @@ func NewAuthProxySession(conn net.Conn, torControlNet, torControlAddress string,
 
 // NewProxySession creates a ProxySession given a client's connection
 // to our proxy listener and a watch bool.
-func NewProxySession(conn net.Conn, torControlNet, torControlAddress string, addOnionDenyList []ListenAddr, watch bool, procInfo ProcInfo, policyList PolicyList) *ProxySession {
+func NewProxySession(conn net.Conn, torControlNet, torControlAddress string, addOnionDenyList []AddrString, watch bool, procInfo ProcInfo, policyList PolicyList) *ProxySession {
 	s := &ProxySession{
 		torControlNet:     torControlNet,
 		torControlAddress: torControlAddress,
@@ -249,7 +234,6 @@ func (s *ProxySession) getProcInfo() *procsnitch.Info {
 		procInfo = s.procInfo.LookupTCPSocketProcess(uint16(srcP), dstIP, uint16(dstP))
 	} else if s.appConn.LocalAddr().Network() == "unix" {
 		procInfo = procsnitch.LookupUNIXSocketProcess(s.appConn.LocalAddr().String())
-		fmt.Println("procInfo from unix domain socket", procInfo)
 	}
 	return procInfo
 }
@@ -515,7 +499,7 @@ func (s *ProxySession) shouldAllowOnion(command string) bool {
 
 func (s *ProxySession) isAddrDenied(net, addr string) bool {
 	for i := 0; i < len(s.addOnionDenyList); i++ {
-		if net == s.addOnionDenyList[i].net && addr == s.addOnionDenyList[i].address {
+		if net == s.addOnionDenyList[i].Net && addr == s.addOnionDenyList[i].Address {
 			return true
 		}
 	}

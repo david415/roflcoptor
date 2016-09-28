@@ -296,6 +296,11 @@ func (s *ProxySession) sessionWorker() {
 	defer s.appConn.Close()
 	var err error = nil
 
+	if s.policy == nil {
+		panic("wtf")
+	}
+	s.clientSieve, s.serverSieve = s.policy.GetSieves()
+
 	// Authenticate with the real control port
 	err = s.initTorControl()
 	if err != nil {
@@ -486,33 +491,39 @@ var addOnionRegexp = regexp.MustCompile("ADD_ONION (?P<keytype>[^ ]+):(?P<keyblo
 // here virtport is different than target port :
 // ADD_ONION NEW:BEST Port=80,127.0.0.1:2345
 func (s *ProxySession) shouldAllowOnion(command string) bool {
-	ports := ""
-	target := ""
+	portString := ""
 	m := addOnionRegexp.FindStringSubmatch(command)
 	if m == nil {
 		return true
 	}
 	for i, name := range addOnionRegexp.SubexpNames() {
 		if name == "ports" {
-			ports = m[i]
+			portString = m[i]
 			break
 		}
 	}
-	fields := strings.Split(ports, ",")
-	if len(fields) == 2 {
-		target = fields[1]
-		fields = strings.Split(target, ":")
+	getEndpointTuple := func(desc string) (string, string) {
+		fields := strings.Split(desc, ":")
 		if len(fields) == 2 {
 			if strings.ToUpper(fields[0]) == "UNIX" {
-				return !s.isAddrDenied("unix", fields[1])
+				return "unix", fields[1]
 			}
-			return !s.isAddrDenied("tcp", target)
+			return "tcp", desc
 		}
-		// target only specifies a port
-		return !s.isAddrDenied("tcp", fmt.Sprintf("127.0.0.1:%s", target))
-	} else {
-		return !s.isAddrDenied("tcp", fmt.Sprintf("127.0.0.1:%s", ports))
+		return "tcp", fmt.Sprintf("127.0.0.1:%s", desc)
 	}
+	ports := strings.Split(portString, ",")
+	if len(ports) == 2 {
+		net, addr := getEndpointTuple(ports[1])
+		if s.isAddrDenied(net, addr) {
+			return false
+		} else {
+			return true
+		}
+	} else {
+		return !s.isAddrDenied("tcp", fmt.Sprintf("127.0.0.1:%s", portString))
+	}
+	return false
 }
 
 func (s *ProxySession) dissectOnion(command string) (keytype, keyblob, onionPort, localPort string, err error) {

@@ -102,9 +102,7 @@ func setupProxyTest(proxyNet, proxyAddress string) (*ProxyListener, *Accumulatin
 				 "250-PrivateKey=", "650 STREAM",
 				"650 HS_DESC", "250 DisableNetwork=","250-status/circuit-established=1", "650 STATUS_CLIENT NOTICE CIRCUIT_NOT_ESTABLISHED"],
     "server-replacement-prefixes" : {},
-    "request-oz-onion-forwarder": true,
-    "oz-app" : "ricochet",
-    "oz-app-forwarder-name" : "dynamic-ricochet-server"
+    "request-oz-onion-forwarder": false
 }`)
 	filterContent = fmt.Sprintf(filterContent, proxyNet, proxyAddress)
 	filterDir, err := ioutil.TempDir("", "filter_load_test")
@@ -130,7 +128,7 @@ func setupProxyTest(proxyNet, proxyAddress string) (*ProxyListener, *Accumulatin
 	return proxyListener, fakeTorService
 }
 
-func WIPTestProxyListenerSession(t *testing.T) {
+func TestProxyListenerSession(t *testing.T) {
 	var err error
 	var clientConn *bulb.Conn
 	var response *bulb.Response
@@ -150,30 +148,50 @@ func WIPTestProxyListenerSession(t *testing.T) {
 		t.Fail()
 	}
 
-	//clientConn.Debug(true)
+	clientConn.Debug(true)
 	clientConn.StartAsyncReader()
-
-	//defer os.Remove(config.TorControlAddress)
-
 	err = clientConn.Authenticate("")
 	if err != nil {
 		t.Errorf("tor control port proxy auth fail: %v", err)
 		t.Fail()
 	}
 
-	response, err = clientConn.Request("ADD_ONION NEW:BEST Port=4491,80")
-	if err != nil || !response.IsOk() {
-		t.Errorf("wtf ADD_ONION fail: %v", err)
+	response, err = clientConn.Request("ADD_ONION NEW:BEST Port=80,4491")
+	if err == nil || response.IsOk() {
+		t.Errorf("ADD_ONION should have failed: %v", err)
 		t.Fail()
 	}
 
 	response, err = clientConn.Request("ADD_ONION NEW:BEST Port=4491")
 	fmt.Println("response is ", response)
-	if response.IsOk() {
+	if err == nil || response.IsOk() {
 		t.Error("yo ADD_ONION fail should have failed because target was control port")
 		t.Fail()
 	}
-	want := "PROTOCOLINFO\nAUTHENTICATE\nADD_ONION NEW:BEST Port=4491,80\n"
+
+	want := "PROTOCOLINFO\nAUTHENTICATE\n"
+	if fakeTorService.buffer.String() != want {
+		t.Errorf("accumulated control commands don't match: got:\n%s\n\nbut expected:\n%s", fakeTorService.buffer.String(), want)
+		t.Fail()
+	}
+	response, err = clientConn.Request("ADD_ONION NEW:BEST Port=3391")
+	fmt.Println("response is ", response)
+	if !response.IsOk() {
+		t.Error("ADD_ONION failed")
+		t.Fail()
+	}
+	want = "PROTOCOLINFO\nAUTHENTICATE\nADD_ONION NEW:BEST Port=3391\n"
+	if fakeTorService.buffer.String() != want {
+		t.Errorf("accumulated control commands don't match: got:\n%s\n\nbut expected:\n%s", fakeTorService.buffer.String(), want)
+		t.Fail()
+	}
+
+	response, err = clientConn.Request("ADD_ONION NEW:BEST Port=4491,80")
+	if err != nil || !response.IsOk() {
+		t.Errorf("ADD_ONION failed")
+		t.Fail()
+	}
+	want = "PROTOCOLINFO\nAUTHENTICATE\nADD_ONION NEW:BEST Port=3391\nADD_ONION NEW:BEST Port=4491,80\n"
 	if fakeTorService.buffer.String() != want {
 		t.Errorf("accumulated control commands don't match: got:\n%s\n\nbut expected:\n%s", fakeTorService.buffer.String(), want)
 		t.Fail()

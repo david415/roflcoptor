@@ -8,37 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/subgraph/go-procsnitch"
-	"github.com/subgraph/procsnitchd/service"
+	"github.com/subgraph/roflcoptor/service"
 	"github.com/yawning/bulb"
 )
-
-type MockProcInfo struct {
-	procInfo *procsnitch.Info
-}
-
-func NewMockProcInfo(procInfo *procsnitch.Info) MockProcInfo {
-	p := MockProcInfo{
-		procInfo: procInfo,
-	}
-	return p
-}
-
-func (r MockProcInfo) Set(procInfo *procsnitch.Info) {
-	r.procInfo = procInfo
-}
-
-func (r MockProcInfo) LookupTCPSocketProcess(srcPort uint16, dstAddr net.IP, dstPort uint16) *procsnitch.Info {
-	return r.procInfo
-}
-
-func (r MockProcInfo) LookupUNIXSocketProcess(socketFile string) *procsnitch.Info {
-	return r.procInfo
-}
-
-func (r MockProcInfo) LookupUDPSocketProcess(srcPort uint16) *procsnitch.Info {
-	return r.procInfo
-}
 
 type AccumulatingListener struct {
 	net, address    string
@@ -104,7 +76,7 @@ func (a *AccumulatingListener) SessionWorker(conn net.Conn) error {
 	return nil
 }
 
-func setupFakeProxyAndTorService(proxyNet, proxyAddress string, procInfo procsnitch.ProcInfo) (*AccumulatingListener, *ProxyListener) {
+func setupFakeProxyAndTorService(proxyNet, proxyAddress string) (*AccumulatingListener, *ProxyListener) {
 	listeners := []AddrString{
 		{
 			Net:     proxyNet,
@@ -112,16 +84,15 @@ func setupFakeProxyAndTorService(proxyNet, proxyAddress string, procInfo procsni
 		},
 	}
 	config := RoflcoptorConfig{
-		ProcSnitchSocketFile: "-",
-		FiltersPath:          "./test_filters",
-		Listeners:            listeners,
-		TorControlNet:        "unix",
-		TorControlAddress:    "test_tor_socket",
+		FiltersPath:       "./test_filters",
+		Listeners:         listeners,
+		TorControlNet:     "unix",
+		TorControlAddress: "test_tor_socket",
 	}
 	fakeTorService := NewAccumulatingListener(config.TorControlNet, config.TorControlAddress)
 	fakeTorService.Start()
 	watch := false
-	proxyListener := NewProxyListener(&config, watch, procInfo)
+	proxyListener := NewProxyListener(&config, watch)
 	proxyListener.StartListeners()
 	fmt.Println("started listeners for testing")
 	return fakeTorService, proxyListener
@@ -132,7 +103,7 @@ func TestGetNilFilterPolicy(t *testing.T) {
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4492"
 
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress, NewMockProcInfo(nil))
+	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
 	defer fakeTorService.Stop()
 	defer proxyService.StopListeners()
 
@@ -154,14 +125,7 @@ func TestGetFilterPolicyFromExecPath(t *testing.T) {
 	fmt.Println("- TestGetFilterPolicyFromExecPath")
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4491"
-	ricochetProcInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress, NewMockProcInfo(&ricochetProcInfo))
+	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
 	defer fakeTorService.Stop()
 	defer proxyService.StopListeners()
 
@@ -182,14 +146,7 @@ func TestGetMissingFilterPolicy(t *testing.T) {
 	fmt.Println("- TestGetMissingFilterPolicy")
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4493"
-	ricochetProcInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/bin/false",
-		CmdLine:   "meow",
-	}
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress, NewMockProcInfo(&ricochetProcInfo))
+	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
 	defer fakeTorService.Stop()
 	defer proxyService.StopListeners()
 
@@ -212,14 +169,7 @@ func TestProxyAuthListenerSession(t *testing.T) {
 
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4491"
-	ricochetProcInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress, NewMockProcInfo(&ricochetProcInfo))
+	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
 	defer fakeTorService.Stop()
 	defer proxyService.StopListeners()
 
@@ -247,14 +197,7 @@ func TestProxyListenerSession(t *testing.T) {
 
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4491"
-	ricochetProcInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress, NewMockProcInfo(&ricochetProcInfo))
+	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
 	defer proxyService.StopListeners()
 	defer fakeTorService.Stop()
 	// test legit connection from ricochet
@@ -310,25 +253,16 @@ func TestProxyListenerWatchModeSession(t *testing.T) {
 		},
 	}
 	config := RoflcoptorConfig{
-		ProcSnitchSocketFile: "-",
-		FiltersPath:          "./filters",
-		Listeners:            listeners,
-		TorControlNet:        "unix",
-		TorControlAddress:    "test_tor_socket",
+		FiltersPath:       "./filters",
+		Listeners:         listeners,
+		TorControlNet:     "unix",
+		TorControlAddress: "test_tor_socket",
 	}
 	fakeTorService := NewAccumulatingListener(config.TorControlNet, config.TorControlAddress)
 	fakeTorService.Start()
 
 	watch := true
-	ricochetProcInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	procInfo := NewMockProcInfo(&ricochetProcInfo)
-	proxyService := NewProxyListener(&config, watch, procInfo)
+	proxyService := NewProxyListener(&config, watch)
 	defer fakeTorService.Stop()
 
 	proxyService.StartListeners()
@@ -364,14 +298,7 @@ func TestUnixSocketListener(t *testing.T) {
 	var err error
 	proxyNet := "unix"
 	proxyAddress := "testing123_socket"
-	ricochetProcInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress, NewMockProcInfo(&ricochetProcInfo))
+	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
 	defer fakeTorService.Stop()
 	defer proxyService.StopListeners()
 
@@ -396,16 +323,8 @@ func TestBadAddressTorControlPort(t *testing.T) {
 	torControlNet := "unix"
 	torControlAddress := "123"
 	denyOnions := []AddrString{}
-	procInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	mockProcInfo := NewMockProcInfo(&procInfo)
 	policy := &SievePolicyJSONConfig{}
-	session := NewAuthProxySession(conn, torControlNet, torControlAddress, denyOnions, false, mockProcInfo, policy)
+	session := NewAuthProxySession(conn, torControlNet, torControlAddress, denyOnions, false, policy)
 
 	err := session.initTorControl()
 	if err == nil {
@@ -423,11 +342,10 @@ func TestNoProtocolInfoTorControlPort(t *testing.T) {
 		},
 	}
 	config := RoflcoptorConfig{
-		ProcSnitchSocketFile: "-",
-		FiltersPath:          "./filters",
-		Listeners:            listeners,
-		TorControlNet:        "unix",
-		TorControlAddress:    "test_tor_socket",
+		FiltersPath:       "./filters",
+		Listeners:         listeners,
+		TorControlNet:     "unix",
+		TorControlAddress: "test_tor_socket",
 	}
 	fakeTorService := NewAccumulatingListener(config.TorControlNet, config.TorControlAddress)
 	fakeTorService.hasProtocolInfo = false
@@ -436,16 +354,8 @@ func TestNoProtocolInfoTorControlPort(t *testing.T) {
 
 	var conn net.Conn
 	denyOnions := []AddrString{}
-	procInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	mockProcInfo := NewMockProcInfo(&procInfo)
 	policy := &SievePolicyJSONConfig{}
-	session := NewAuthProxySession(conn, config.TorControlNet, config.TorControlAddress, denyOnions, false, mockProcInfo, policy)
+	session := NewAuthProxySession(conn, config.TorControlNet, config.TorControlAddress, denyOnions, false, policy)
 	err := session.initTorControl()
 	if err == nil {
 		t.Errorf("expected failure")
@@ -463,11 +373,10 @@ func TestNoAuthenticateTorControlPort(t *testing.T) {
 		},
 	}
 	config := RoflcoptorConfig{
-		ProcSnitchSocketFile: "-",
-		FiltersPath:          "./filters",
-		Listeners:            listeners,
-		TorControlNet:        "unix",
-		TorControlAddress:    "test_tor_socket",
+		FiltersPath:       "./filters",
+		Listeners:         listeners,
+		TorControlNet:     "unix",
+		TorControlAddress: "test_tor_socket",
 	}
 	fakeTorService := NewAccumulatingListener(config.TorControlNet, config.TorControlAddress)
 	fakeTorService.hasAuthenticate = false
@@ -476,16 +385,8 @@ func TestNoAuthenticateTorControlPort(t *testing.T) {
 
 	var conn net.Conn
 	denyOnions := []AddrString{}
-	procInfo := procsnitch.Info{
-		UID:       1,
-		Pid:       1,
-		ParentPid: 1,
-		ExePath:   "/usr/local/bin/ricochet",
-		CmdLine:   "testing_cmd_line",
-	}
-	mockProcInfo := NewMockProcInfo(&procInfo)
 	policy := &SievePolicyJSONConfig{}
-	session := NewAuthProxySession(conn, config.TorControlNet, config.TorControlAddress, denyOnions, false, mockProcInfo, policy)
+	session := NewAuthProxySession(conn, config.TorControlNet, config.TorControlAddress, denyOnions, false, policy)
 	err := session.initTorControl()
 	if err == nil {
 		t.Errorf("expected failure")
@@ -501,10 +402,8 @@ func TestShouldAllowOnion(t *testing.T) {
 		{"unix", "/var/run/tor/control"},
 		{"tcp", "127.0.0.1:9051"},
 	}
-	procInfo := procsnitch.Info{}
-	mockProcInfo := NewMockProcInfo(&procInfo)
 	policy := &SievePolicyJSONConfig{}
-	session := NewAuthProxySession(conn, "meownew", "meowaddr", denyOnions, false, mockProcInfo, policy)
+	session := NewAuthProxySession(conn, "meownew", "meowaddr", denyOnions, false, policy)
 
 	tests := []struct {
 		in   string

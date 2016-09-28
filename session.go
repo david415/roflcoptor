@@ -193,7 +193,7 @@ func (s *ProxySession) TorVersion() string {
 
 func (s *ProxySession) appConnWrite(fromServer bool, b []byte) (int, error) {
 	var appName, prefix string
-	appName = "" // XXX fix me
+	appName = s.policy.Name
 
 	if fromServer {
 		prefix = appName + "S->C:"
@@ -213,7 +213,7 @@ func (s *ProxySession) appConnReadLine() (cmd string, splitCmd []string, rawLine
 	if rawLine, err = s.appConnReader.ReadBytes('\n'); err != nil {
 		return
 	}
-	appName := "" // XXX fix me
+	appName := s.policy.Name
 	var prefix string
 	if s.isPreAuth {
 		prefix = appName + "C [PreAuth]:"
@@ -337,7 +337,7 @@ func (s *ProxySession) sessionWorker() {
 // If watch-mode is enabled we pass the message through.
 func (s *ProxySession) proxyFilterTorToApp() {
 	defer s.Done()
-	appName := "" // XXX fix me
+	appName := s.policy.Name
 
 	for {
 		response, err := s.torConn.ReadResponse()

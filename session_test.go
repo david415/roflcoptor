@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -76,131 +79,68 @@ func (a *AccumulatingListener) SessionWorker(conn net.Conn) error {
 	return nil
 }
 
-func setupFakeProxyAndTorService(proxyNet, proxyAddress string) (*AccumulatingListener, *ProxyListener) {
-	listeners := []AddrString{
-		{
-			Net:     proxyNet,
-			Address: proxyAddress,
-		},
+func setupProxyTest(proxyNet, proxyAddress string) (*ProxyListener, *AccumulatingListener) {
+	filterContent := string(`
+{
+    "AuthNetAddr" : "%s",
+    "AuthAddr" : "%s",
+    "client-allowed" : ["SETEVENTS SIGNAL CONF_CHANGED",
+			"GETCONF __owningcontrollerprocess",
+			"GETINFO version",
+			"SETEVENTS SIGNAL HS_DESC CONF_CHANGED",
+			"GETCONF DisableNetwork",
+			"SETEVENTS STATUS_CLIENT",
+			"GETINFO status/circuit-established status/bootstrap-phase net/listeners/socks"
+		       ],
+    "client-allowed-prefixes" : ["ADD_ONION", "DEL_ONION"],
+    "client-replacements" : {},
+    "client-replacement-prefixes" : {},
+    "server-allowed" : ["250 OK",
+		       "250 __OwningControllerProcess",
+			"650 STATUS_CLIENT NOTICE CONSENSUS_ARRIVED", "550 Onion address collision", "650 STATUS_CLIENT NOTICE CIRCUIT_ESTABLISHED"],
+    "server-allowed-prefixes" : ["250-ServiceID=", "250-VERSION","250-version",
+				 "250-PrivateKey=", "650 STREAM",
+				"650 HS_DESC", "250 DisableNetwork=","250-status/circuit-established=1", "650 STATUS_CLIENT NOTICE CIRCUIT_NOT_ESTABLISHED"],
+    "server-replacement-prefixes" : {},
+    "request-oz-onion-forwarder": true,
+    "oz-app" : "ricochet",
+    "oz-app-forwarder-name" : "dynamic-ricochet-server"
+}`)
+	filterContent = fmt.Sprintf(filterContent, proxyNet, proxyAddress)
+	filterDir, err := ioutil.TempDir("", "filter_load_test")
+	if err != nil {
+		panic(err)
 	}
+	defer os.RemoveAll(filterDir)
+	filterFile := filepath.Join(filterDir, "valid_app_filter.json")
+	if err := ioutil.WriteFile(filterFile, []byte(filterContent), 0666); err != nil {
+		panic(err)
+	}
+
 	config := RoflcoptorConfig{
-		FiltersPath:       "./test_filters",
-		Listeners:         listeners,
+		FiltersPath:       filterDir,
 		TorControlNet:     "unix",
 		TorControlAddress: "test_tor_socket",
 	}
 	fakeTorService := NewAccumulatingListener(config.TorControlNet, config.TorControlAddress)
 	fakeTorService.Start()
-	watch := false
-	proxyListener := NewProxyListener(&config, watch)
+
+	proxyListener := NewProxyListener(&config, false)
 	proxyListener.StartListeners()
-	fmt.Println("started listeners for testing")
-	return fakeTorService, proxyListener
+	return proxyListener, fakeTorService
 }
 
-func TestGetNilFilterPolicy(t *testing.T) {
-	fmt.Println("- TestGetNilFilterPolicy")
-	proxyNet := "tcp"
-	proxyAddress := "127.0.0.1:4492"
-
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
-	defer fakeTorService.Stop()
-	defer proxyService.StopListeners()
-
-	clientConn, err := bulb.Dial(proxyNet, proxyAddress)
-	defer clientConn.Close()
-	if err != nil {
-		panic(err)
-	}
-	clientConn.Debug(true)
-	err = clientConn.Authenticate("")
-	if err == nil {
-		t.Error("expected failure")
-		t.Fail()
-	}
-
-}
-
-func TestGetFilterPolicyFromExecPath(t *testing.T) {
-	fmt.Println("- TestGetFilterPolicyFromExecPath")
-	proxyNet := "tcp"
-	proxyAddress := "127.0.0.1:4491"
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
-	defer fakeTorService.Stop()
-	defer proxyService.StopListeners()
-
-	clientConn, err := bulb.Dial(proxyNet, proxyAddress)
-	defer clientConn.Close()
-	if err != nil {
-		panic(err)
-	}
-	clientConn.Debug(true)
-	err = clientConn.Authenticate("")
-	if err != nil {
-		t.Errorf("client connect fail: %s\n", err)
-		t.Fail()
-	}
-}
-
-func TestGetMissingFilterPolicy(t *testing.T) {
-	fmt.Println("- TestGetMissingFilterPolicy")
-	proxyNet := "tcp"
-	proxyAddress := "127.0.0.1:4493"
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
-	defer fakeTorService.Stop()
-	defer proxyService.StopListeners()
-
-	clientConn, err := bulb.Dial(proxyNet, proxyAddress)
-	defer clientConn.Close()
-	if err != nil {
-		panic(err)
-	}
-	clientConn.Debug(true)
-	err = clientConn.Authenticate("")
-	if err == nil {
-		t.Errorf("expected failure due to missing filter policy")
-		t.Fail()
-	}
-}
-
-func TestProxyAuthListenerSession(t *testing.T) {
-	fmt.Println("- TestProxyAuthListenerSession")
-	var err error
-
-	proxyNet := "tcp"
-	proxyAddress := "127.0.0.1:4491"
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
-	defer fakeTorService.Stop()
-	defer proxyService.StopListeners()
-
-	var clientConn *bulb.Conn
-	clientConn, err = bulb.Dial(proxyNet, proxyAddress)
-	defer clientConn.Close()
-	if err != nil {
-		t.Errorf("Failed to connect to tor control port: %v", err)
-		t.Fail()
-	}
-	clientConn.Debug(true)
-	err = clientConn.Authenticate("")
-	if err != nil {
-		t.Errorf("authentication error: %s", err)
-		t.Fail()
-	}
-}
-
-func TestProxyListenerSession(t *testing.T) {
+func WIPTestProxyListenerSession(t *testing.T) {
 	var err error
 	var clientConn *bulb.Conn
 	var response *bulb.Response
-
 	fmt.Println("- TestProxyListenerSession")
 
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4491"
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
-	defer proxyService.StopListeners()
+	proxyListener, fakeTorService := setupProxyTest(proxyNet, proxyAddress)
+	defer proxyListener.StopListeners()
 	defer fakeTorService.Stop()
-	// test legit connection from ricochet
 
 	clientConn, err = bulb.Dial(proxyNet, proxyAddress)
 	defer clientConn.Close()
@@ -245,47 +185,21 @@ func TestProxyListenerWatchModeSession(t *testing.T) {
 	var err error
 	proxyNet := "tcp"
 	proxyAddress := "127.0.0.1:4491"
-
-	listeners := []AddrString{
-		{
-			Net:     proxyNet,
-			Address: proxyAddress,
-		},
-	}
-	config := RoflcoptorConfig{
-		FiltersPath:       "./filters",
-		Listeners:         listeners,
-		TorControlNet:     "unix",
-		TorControlAddress: "test_tor_socket",
-	}
-	fakeTorService := NewAccumulatingListener(config.TorControlNet, config.TorControlAddress)
-	fakeTorService.Start()
-
-	watch := true
-	proxyService := NewProxyListener(&config, watch)
+	proxyListener, fakeTorService := setupProxyTest(proxyNet, proxyAddress)
+	defer proxyListener.StopListeners()
 	defer fakeTorService.Stop()
-
-	proxyService.StartListeners()
-	defer proxyService.StopListeners()
-
-	// test legit connection from ricochet
 	var clientConn *bulb.Conn
 	clientConn, err = bulb.Dial(proxyNet, proxyAddress)
 	defer clientConn.Close()
-
 	if err != nil {
 		t.Errorf("Failed to connect to tor control port: %v", err)
 		t.Fail()
 	}
-
 	clientConn.Debug(true)
-	//defer os.Remove(config.TorControlAddress)
-
 	err = clientConn.Authenticate("")
 	if err != nil {
 		panic(err)
 	}
-
 	want := "PROTOCOLINFO\nAUTHENTICATE\n"
 	if fakeTorService.buffer.String() != want {
 		t.Errorf("accumulated control commands don't match: got:\n%s\n\nbut expected:\n%s", fakeTorService.buffer.String(), want)
@@ -296,13 +210,16 @@ func TestProxyListenerWatchModeSession(t *testing.T) {
 func TestUnixSocketListener(t *testing.T) {
 	fmt.Println("TestUnixSocketListener")
 	var err error
-	proxyNet := "unix"
-	proxyAddress := "testing123_socket"
-	fakeTorService, proxyService := setupFakeProxyAndTorService(proxyNet, proxyAddress)
-	defer fakeTorService.Stop()
-	defer proxyService.StopListeners()
-
 	var clientConn *bulb.Conn
+
+	proxyNet := "unix"
+	proxyAddress := "ricochet.socket"
+
+	proxyListener, fakeTorService := setupProxyTest(proxyNet, proxyAddress)
+	defer proxyListener.StopListeners()
+	defer fakeTorService.Stop()
+	// as defined in test_filters/ricochet.json
+
 	clientConn, err = bulb.Dial(proxyNet, proxyAddress)
 	defer clientConn.Close()
 	if err != nil {
@@ -335,15 +252,8 @@ func TestBadAddressTorControlPort(t *testing.T) {
 
 func TestNoProtocolInfoTorControlPort(t *testing.T) {
 	fmt.Println("TestNoProtocolInfoTorControlPort")
-	listeners := []AddrString{
-		{
-			Net:     "unix",
-			Address: "proxy_socket",
-		},
-	}
 	config := RoflcoptorConfig{
 		FiltersPath:       "./filters",
-		Listeners:         listeners,
 		TorControlNet:     "unix",
 		TorControlAddress: "test_tor_socket",
 	}
@@ -366,15 +276,8 @@ func TestNoProtocolInfoTorControlPort(t *testing.T) {
 
 func TestNoAuthenticateTorControlPort(t *testing.T) {
 	fmt.Println("TestNoAuthenticateTorControlPort")
-	listeners := []AddrString{
-		{
-			Net:     "unix",
-			Address: "proxy_socket",
-		},
-	}
 	config := RoflcoptorConfig{
 		FiltersPath:       "./filters",
-		Listeners:         listeners,
 		TorControlNet:     "unix",
 		TorControlAddress: "test_tor_socket",
 	}

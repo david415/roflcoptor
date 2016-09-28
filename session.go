@@ -36,7 +36,6 @@ const (
 type ProxyListener struct {
 	cfg            *RoflcoptorConfig
 	watch          bool
-	services       []*service.MortalService
 	authedServices []*service.MortalService
 	onionDenyAddrs []AddrString
 	errChan        chan error
@@ -75,13 +74,9 @@ func (p *ProxyListener) StartListeners() {
 
 // StopListeners stops all the listeners
 func (p *ProxyListener) StopListeners() {
-	stopServices := func(services []*service.MortalService) {
-		for _, service := range services {
-			service.Stop()
-		}
+	for _, service := range p.authedServices {
+		service.Stop()
 	}
-	stopServices(p.services)
-	stopServices(p.authedServices)
 }
 
 func (p *ProxyListener) compileOnionAddrBlacklist() {
@@ -90,12 +85,6 @@ func (p *ProxyListener) compileOnionAddrBlacklist() {
 		Net:     p.cfg.TorControlNet,
 		Address: p.cfg.TorControlAddress,
 	})
-	for _, listener := range p.cfg.Listeners {
-		p.onionDenyAddrs = append(p.onionDenyAddrs, AddrString{
-			Net:     listener.Net,
-			Address: listener.Address,
-		})
-	}
 }
 
 // InitAuthenticatedListeners runs each auth listener
@@ -118,7 +107,7 @@ func (p *ProxyListener) initAuthenticatedListeners() {
 
 			return nil
 		}
-		log.Noticef("%s policy listener starting on %s:%s", policy.ExecPath, location.Net, location.Address)
+		log.Noticef("%s listener starting on %s:%s", policy.Name, location.Net, location.Address)
 		p.authedServices = append(p.authedServices, service.NewMortalService(location.Net, location.Address, handleNewConnection))
 		err = p.authedServices[len(p.authedServices)-1].Start()
 		if err != nil {
@@ -358,7 +347,7 @@ func (s *ProxySession) proxyFilterTorToApp() {
 		} else {
 			outputMessage := s.serverSieve.Filter(responseStr)
 			if outputMessage == "" {
-				log.Errorf("filter policy for %s DENY: %s A<-T: [%q]\n", s.policy.ExecPath, appName, responseStr)
+				log.Errorf("filter policy for %s DENY: A<-T: [%q]\n", s.policy.Name, responseStr)
 			} else {
 				_, err = s.appConnWrite(true, []byte(outputMessage+"\r\n"))
 			}
@@ -406,7 +395,7 @@ func (s *ProxySession) proxyFilterAppToTor() {
 
 			outputMessage := s.clientSieve.Filter(cmdLine)
 			if outputMessage == "" {
-				log.Errorf("filter policy for %s DENY: %s A->T: [%s]\n", s.policy.ExecPath, appName, cmdLine)
+				log.Errorf("filter policy for %s DENY: A->T: [%s]\n", s.policy.Name, cmdLine)
 				_, err = s.appConnWrite(false, []byte("510 Tor Control command proxy denied: filtration policy.\r\n"))
 				continue
 			} else {
@@ -426,7 +415,7 @@ func (s *ProxySession) proxyFilterAppToTor() {
 					} else {
 						if s.policy.OzForwardOnion == true {
 							if s.policy.OzApp == "" {
-								log.Errorf("Missing Oz profile name, filter policy syntax error on %s so DENY: %s A->T: [%s]\n", s.policy.ExecPath, appName, cmdLine)
+								log.Errorf("Missing Oz profile name, filter policy syntax error on %s so DENY: A->T: [%s]\n", s.policy.Name, cmdLine)
 								_, err = s.appConnWrite(false, []byte("510 Tor Control command proxy denied: filtration policy.\r\n"))
 								if err != nil {
 									s.errChan <- err
@@ -435,7 +424,7 @@ func (s *ProxySession) proxyFilterAppToTor() {
 							}
 							id, err := s.findOzSandbox(s.policy.OzApp)
 							if err != nil {
-								log.Errorf("Could not lookup %s sandbox ID for %s so DENY: %s A->T: [%s]\n", s.policy.OzApp, s.policy.ExecPath, appName, cmdLine)
+								log.Errorf("Could not lookup %s sandbox ID for %s so DENY: A->T: [%s]\n", s.policy.OzApp, s.policy.Name, cmdLine)
 								_, err = s.appConnWrite(false, []byte("510 Tor Control command proxy denied: filtration policy.\r\n"))
 								if err != nil {
 									s.errChan <- err

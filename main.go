@@ -80,8 +80,6 @@ func setupLoggerBackend(level logging.Level) logging.LeveledBackend {
 type RoflcoptorConfig struct {
 	// FiltersPath is the directory where filter rules are kept
 	FiltersPath string
-	// Listeners for non-Oz applications
-	Listeners []AddrString
 	// TorControlNet network for tor control port
 	TorControlNet string
 	// TorControlNet address for tor control port

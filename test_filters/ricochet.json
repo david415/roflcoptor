@@ -1,5 +1,7 @@
 {
-    "exec-path": "/usr/local/bin/ricochet",
+    "Name": "ricochet",
+    "AuthNetAddr" : "unix",
+    "AuthAddr" : "ricochet.socket",
     "client-allowed" : ["GETCONF DisableNetwork",
                         "SETEVENTS STATUS_CLIENT",
                         "GETINFO status/circuit-established status/bootstrap-phase net/listeners/socks"],
